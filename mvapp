@@ -1,0 +1,68 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import os
+import plistlib
+import subprocess
+import sys
+import zipfile
+
+
+DEFAULT_APP_PATH = "~/Music/iTunes/iTunes Media/Mobile Applications"
+
+def list_files(dir):
+  """List dir."""
+  files = [os.path.join(dir, f) for f in os.listdir(dir)]
+  return filter(os.path.isfile, files)
+
+
+def filter_ipa(filenames):
+  """Filter *.ipa files."""
+  ext_filter = lambda x: '.ipa' == os.path.splitext(x)[-1]
+  return filter(ext_filter, filenames)
+  
+
+def metadata_file(filename):
+  """Unzip iTunesMetadata.plist file."""
+  zfile = zipfile.ZipFile(filename)
+  data  = zfile.read('iTunesMetadata.plist')
+  zfile.close()
+  return data
+
+
+def metadata(data):
+  """Convert plist file to propery list."""
+  if data.startswith('bplist'):
+    proc = subprocess.Popen(['plutil', '-convert', 'xml1', '-o', '-', '-'], \
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    proc.stdin.write(data)
+    data = proc.communicate()[0]
+  return plistlib.readPlistFromString(data)
+
+
+def release_date(dict):
+  """Query for release date."""
+  return dict.get('releaseDate')
+
+
+def purchase_date(dict):
+  """Query for purchase date."""
+  if 'purchaseDate' in dict:
+    return dict.get('purchaseDate')
+  else:
+    dinfo = dict.get('com.apple.iTunesStore.downloadInfo')
+    return dinfo.get('purchaseDate')
+
+
+def main(Argv=None):
+  Argv = Argv or sys.argv[1:]
+  
+  app_path = os.path.expanduser(DEFAULT_APP_PATH)
+  
+  for f in filter_ipa(list_files(app_path)):
+    m = metadata(metadata_file(f))
+    #print f, release_date(m), purchase_date(m)
+    print release_date(m), purchase_date(m)
+
+if __name__ == '__main__':
+  sys.exit(main())
