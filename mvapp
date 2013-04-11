@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import datetime
 import os
 import plistlib
 import subprocess
@@ -8,61 +9,146 @@ import sys
 import zipfile
 
 
-DEFAULT_APP_PATH = "~/Music/iTunes/iTunes Media/Mobile Applications"
-
-def list_files(dir):
-  """List dir."""
-  files = [os.path.join(dir, f) for f in os.listdir(dir)]
-  return filter(os.path.isfile, files)
+DEFAULT_APP_PATH     = '~/Music/iTunes/iTunes Media/Mobile Applications'
+DEFAULT_BACKUPS_PATH = '~/Library/Application Support/MobileSync/Backup'
+DEFAULT_DEVICE       = None
 
 
-def filter_ipa(filenames):
+def path_items(path):
+  """Return items (directories, files, ...) in path."""
+  return [os.path.join(path, f) for f in os.listdir(path)]
+
+
+def is_ipa(filename):
   """Filter *.ipa files."""
-  ext_filter = lambda x: '.ipa' == os.path.splitext(x)[-1]
-  return filter(ext_filter, filenames)
+  return os.path.isfile(filename) and '.ipa' == os.path.splitext(filename)[-1]
   
 
-def metadata_file(filename):
-  """Unzip iTunesMetadata.plist file."""
-  zfile = zipfile.ZipFile(filename)
-  data  = zfile.read('iTunesMetadata.plist')
-  zfile.close()
+def extract_plist(zipfilename):
+  """Extract iTunesMetadata.plist file from ipa zip file."""
+  try:
+    zfile = zipfile.ZipFile(zipfilename)
+    data  = zfile.read('iTunesMetadata.plist')
+  finally:
+    zfile.close()
   return data
 
 
-def metadata(data):
-  """Convert plist file to propery list."""
-  if data.startswith('bplist'):
+def read_plist(plist):
+  """Read binary/xml plist data/file."""
+  if plist.find('\x00') < 0 and os.path.isfile(plist):
+    try:
+      file = open(plist)
+      data = read_plist_string(file.read())
+    finally:
+      file.close()
+    return data
+  else:
+    return read_plist_string(plist)
+
+
+def read_plist_string(plist):
+  """Read binary/xml plist data."""
+  if plist.startswith('bplist'):
     proc = subprocess.Popen(['plutil', '-convert', 'xml1', '-o', '-', '-'], \
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    proc.stdin.write(data)
-    data = proc.communicate()[0]
-  return plistlib.readPlistFromString(data)
-
-
-def release_date(dict):
-  """Query for release date."""
-  return dict.get('releaseDate')
-
-
-def purchase_date(dict):
-  """Query for purchase date."""
-  if 'purchaseDate' in dict:
-    return dict.get('purchaseDate')
+    proc.stdin.write(plist)
+    return plistlib.readPlistFromString(proc.communicate()[0])
   else:
-    dinfo = dict.get('com.apple.iTunesStore.downloadInfo')
-    return dinfo.get('purchaseDate')
+    return plistlib.readPlistFromString(plist)
+
+
+def release_date(metadata):
+  """Query for release date."""
+  return metadata.get('releaseDate')
+
+
+def purchase_date(metadata):
+  """Query for purchase date."""
+  if 'purchaseDate' in metadata:
+    return metadata.get('purchaseDate')
+  else:
+    info = metadata.get('com.apple.iTunesStore.downloadInfo')
+    return info.get('purchaseDate')
+
+
+def bundle_id(metadata):
+  """Query for software version bundle id."""
+  return metadata.get('softwareVersionBundleId')
+
+def aggregate(zipfilename):
+  """Aggregate the release and purchase date for an ipa file."""
+  metadata = read_plist(extract_plist(zipfilename))
+  return {
+      'filename': zipfilename,
+      'app_name': bundle_id(metadata),
+      'release_date': release_date(metadata),
+      'purchase_date': purchase_date(metadata)
+  }
+
+
+def installed_apps(backups_path, device):
+  """Return a list of installed apps on a given device."""
+  # return {{LATEST_BACKUP}}/HASH(Library/SpringBoard/IconState.plist) > ...
+  # return {{LATEST_BACKUP}}/Info.plist > iTunes Settings/Library Applications/*
+  # return {{LATEST_BACKUP}}/Manifest.plist > Applications/*
+  latest = latest_backup(backups_path, device)
+  latest_path = os.path.join(backups_path, latest, 'Manifest.plist')
+  apps = read_plist(latest_path).get('Applications')
+  return apps.keys()
+
+
+def backup_info(backup_path):
+  """Read backup info."""
+  return read_plist(os.path.join(backup_path, 'Info.plist'))
+
+
+def latest_backup(backups_path, device):
+  """Return path to latest backup"""
+  backup_paths   = filter(os.path.isdir, path_items(backups_path))
+  backups        = map(backup_info, backup_paths)
+  device_backups = filter(lambda backup: is_device(device, backup), backups)
+  sorter         = lambda backup: backup.get('Last Backup Date', datetime.datetime.min)
+  sorted_backups = sorted(device_backups, key=sorter, reverse=True)
+  return first(sorted_backups).get('Unique Identifier').lower()
+
+
+def first(list):
+  """Return first item in list or None."""
+  if list:
+    return list[0]
+  else:
+    return None
+
+
+def is_device(device, info):
+  """Check if device has device/display name, GUID, IMEI or serial number."""
+  if device == None:
+    return True
+  return device_name in [info.get('Device Name'),
+                         info.get('Display Name'),
+                         info.get('GUID Name'),
+                         info.get('IMEI Name'),
+                         info.get('Serial Number')]
+
+
+def installed(metadata, installed_apps):
+  """Predicate if app is installed."""
+  return metadata.get('app_name') in installed_apps
 
 
 def main(Argv=None):
   Argv = Argv or sys.argv[1:]
   
-  app_path = os.path.expanduser(DEFAULT_APP_PATH)
+  ipa_path  = os.path.expanduser(DEFAULT_APP_PATH)
+  ipa_files = filter(is_ipa, path_items(ipa_path))
+  down_apps = map(aggregate, ipa_files)
+  inst_apps = installed_apps(os.path.expanduser(DEFAULT_BACKUPS_PATH), DEFAULT_DEVICE)
+  # TODO: Match down_apps and inst_apps names
+  purc_apps = filter(lambda app: installed(app, inst_apps), down_apps)
+  result    = sorted(purc_apps, key=lambda app: app.get('release_date'))
+  print first(result).get('app_name')
   
-  for f in filter_ipa(list_files(app_path)):
-    m = metadata(metadata_file(f))
-    #print f, release_date(m), purchase_date(m)
-    print release_date(m), purchase_date(m)
 
 if __name__ == '__main__':
   sys.exit(main())
