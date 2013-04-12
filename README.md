@@ -14,10 +14,19 @@ Download and run the script:
 
 # Caveats
 
-* You need to have a iOS device backup available locally.
+* You need to have a iOS device backup available locally
 * You need to have all purchased apps downloaded
 * Some apps are listed by their latest update's "purchase" date instead of
   original purchase date
+
+# How it works
+
+A device backup contains a list of all currently installed app. All downloaded
+apps contain their release & purchase date. The script joins the list of
+installed apps with the release & purchase dates and sorts it.
+
+To my knowledge there is currently no other way (e.g. API) to retrieve a list
+of purchased and installed apps on an iOS device.
 
 # Privacy
 
