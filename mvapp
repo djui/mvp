@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import datetime
+import getopt
 import os
 import plistlib
 import subprocess
@@ -9,10 +10,10 @@ import sys
 import zipfile
 
 
-DEFAULT_APP_PATH     = '~/Music/iTunes/iTunes Media/Mobile Applications'
+DEFAULT_APPS_PATH    = '~/Music/iTunes/iTunes Media/Mobile Applications'
 DEFAULT_BACKUPS_PATH = '~/Library/Application Support/MobileSync/Backup'
-DEFAULT_DEVICE       = None
-
+DEFAULT_DEVICE_ID    = None
+VERSION              = '1.0'
 
 def path_items(path):
   """Return items (directories, files, ...) in path."""
@@ -137,18 +138,64 @@ def installed(metadata, installed_apps):
   return metadata.get('app_name') in installed_apps
 
 
-def main(Argv=None):
-  Argv = Argv or sys.argv[1:]
+def usage():
+  """Shows usage/help screen."""
+  return '''Usage: %s [options...] <file>
+Options:
+ -a, --apps-path=<path>     Non-default path to downloaded apps by iTunes
+ -b, --backups-path=<path>  Non-default path to device backups
+ -d, --device-id=<device>   Device id (name, GUID, ICCID, IMEI, serial number)
+ -v, --version              Show version info
+ -h, --help                 Show usage screen''' % os.path.basename(sys.argv[0])
+
+
+def exit(code, str):
+  """Write error to stderr if exit code not 0 and exits with exit code."""
+  if code:
+    sys.stderr.write(str + '\n')
+  else:
+    print str
+  return code
+
+
+def main(argv=None):
+  if not argv: argv = sys.argv[1:]
+  try:
+    long_opts = ['help', 'version', 'apps-path=', 'backups-path=', 'device-id=']
+    opts, args = getopt.getopt(argv, 'hva:b:d:', long_opts)
+  except getopt.GetoptError as err:
+    return exit(1, str(err) + '\n' + usage())
   
-  ipa_path  = os.path.expanduser(DEFAULT_APP_PATH)
-  ipa_files = filter(is_ipa, path_items(ipa_path))
-  down_apps = map(aggregate, ipa_files)
-  inst_apps = installed_apps(os.path.expanduser(DEFAULT_BACKUPS_PATH), DEFAULT_DEVICE)
-  # TODO: Match down_apps and inst_apps names
-  purc_apps = filter(lambda app: installed(app, inst_apps), down_apps)
-  result    = sorted(purc_apps, key=lambda app: app.get('release_date'))
-  print first(result).get('app_name')
+  apps_path    = DEFAULT_APPS_PATH
+  backups_path = DEFAULT_BACKUPS_PATH
+  device_id    = DEFAULT_DEVICE_ID
   
+  for o, a in opts:
+    if (o in ['-h', '--help']):
+      return exit(0, usage())
+    elif (o in ['-v', '--version']):
+      return exit(0, VERSION)
+    elif (o in ['-a', '--apps-path']):
+      apps_path = a
+    elif (o in ['-b', '--backups-path']):
+      backups_path = a
+    elif (o in ['-d', '--device-id']):
+      device_id = a
+    else:
+      return exit(1, 'invalid argument: "%s".' % a)
+  
+  try:
+    ipa_path  = os.path.expanduser(apps_path)
+    ipa_files = filter(is_ipa, path_items(ipa_path))
+    down_apps = map(aggregate, ipa_files)
+    inst_apps = installed_apps(os.path.expanduser(backups_path), device_id)
+    purc_apps = filter(lambda app: installed(app, inst_apps), down_apps)
+    rel_mvps  = sorted(purc_apps, key=lambda app: app.get('release_date'))
+    pur_mvps  = sorted(purc_apps, key=lambda app: app.get('purchase_date'))
+    print 'MVP (by release date) : ', first(rel_mvps).get('app_name')
+    print 'MVP (by purchase date): ', first(pur_mvps).get('app_name')
+  except Exception as e:
+    return exit(1, str(e))
 
 if __name__ == '__main__':
   sys.exit(main())
