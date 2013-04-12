@@ -15,6 +15,59 @@ DEFAULT_BACKUPS_PATH = '~/Library/Application Support/MobileSync/Backup'
 DEFAULT_DEVICE_ID    = None
 VERSION              = '1.0'
 
+
+def main(argv=None):
+  if not argv: argv = sys.argv[1:]
+  try:
+    long_opts = ['help',
+                 'version',
+                 'apps-path=',
+                 'backups-path=',
+                 'device-id='
+                 'purchased',
+                 'list-all']
+    opts, args = getopt.getopt(argv, 'hva:b:d:pl', long_opts)
+  except getopt.GetoptError as err:
+    return exit(1, str(err) + '\n' + usage())
+  
+  apps_path    = DEFAULT_APPS_PATH
+  backups_path = DEFAULT_BACKUPS_PATH
+  device_id    = DEFAULT_DEVICE_ID
+  sort_crit    = 'release_date'
+  oldest       = True
+  
+  for o, a in opts:
+    if (o in ['-h', '--help']):
+      return exit(0, usage())
+    elif (o in ['-v', '--version']):
+      return exit(0, VERSION)
+    elif (o in ['-a', '--apps-path']):
+      apps_path = a
+    elif (o in ['-b', '--backups-path']):
+      backups_path = a
+    elif (o in ['-d', '--device-id']):
+      device_id = a
+    elif (o in ['-p', '--purchased']):
+      sort_crit = 'purchase_date'
+    elif (o in ['-l', '--list-all']):
+      oldest = False
+    else:
+      return exit(1, 'invalid argument: "%s".' % a)
+  
+  try:
+    ipa_path  = os.path.expanduser(apps_path)
+    ipa_files = filter(is_ipa, path_items(ipa_path))
+    down_apps = map(aggregate, ipa_files)
+    inst_apps = installed_apps(os.path.expanduser(backups_path), device_id)
+    purc_apps = filter(lambda app: installed(app, inst_apps), down_apps)
+    mvps      = sorted(purc_apps, key=lambda app: app.get(sort_crit))
+    for mvp in mvps:
+      print mvp.get('app_name'), mvp.get(sort_crit)
+      if oldest: break
+  except Exception as e:
+    return exit(1, str(e))
+
+
 def path_items(path):
   """Return items (directories, files, ...) in path."""
   return [os.path.join(path, f) for f in os.listdir(path)]
@@ -24,6 +77,17 @@ def is_ipa(filename):
   """Filter *.ipa files."""
   return os.path.isfile(filename) and '.ipa' == os.path.splitext(filename)[-1]
   
+
+def aggregate(zipfilename):
+  """Aggregate the release and purchase date for an ipa file."""
+  metadata = read_plist(extract_plist(zipfilename))
+  return {
+      'filename': zipfilename,
+      'app_name': bundle_id(metadata),
+      'release_date': release_date(metadata),
+      'purchase_date': purchase_date(metadata)
+  }
+
 
 def extract_plist(zipfilename):
   """Extract iTunesMetadata.plist file from ipa zip file."""
@@ -73,44 +137,51 @@ def purchase_date(metadata):
     purchase_date = download_info.get('purchaseDate')
     return datetime.datetime.strptime(purchase_date, '%Y-%m-%dT%H:%M:%SZ')
 
+
 def bundle_id(metadata):
   """Query for software version bundle id."""
   return metadata.get('softwareVersionBundleId')
 
 
-def aggregate(zipfilename):
-  """Aggregate the release and purchase date for an ipa file."""
-  metadata = read_plist(extract_plist(zipfilename))
-  return {
-      'filename': zipfilename,
-      'app_name': bundle_id(metadata),
-      'release_date': release_date(metadata),
-      'purchase_date': purchase_date(metadata)
-  }
-
-
 def installed_apps(backups_path, device):
   """Return a list of installed apps on a given device."""
   latest = latest_backup(backups_path, device)
-  latest_path = os.path.join(backups_path, latest, 'Info.plist')
-  apps = read_plist(latest_path).get('Installed Applications')
-  return apps
-
-
-def backup_info(backup_path):
-  """Read backup info."""
-  return read_plist(os.path.join(backup_path, 'Info.plist'))
+  if not latest: raise AssertionException('No backup found')
+  return latest.get('Applications')
 
 
 def latest_backup(backups_path, device):
   """Return path to latest backup"""
-  backup_paths   = filter(os.path.isdir, path_items(backups_path))
-  backups        = map(backup_info, backup_paths)
-  device_backups = filter(lambda backup: is_device(device, backup), backups)
-  sorter         = lambda backup: backup.get('Last Backup Date', datetime.datetime.min)
-  sorted_backups = sorted(device_backups, key=sorter, reverse=True)
-  if not sorted_backups: raise AssertionError('No backup found')
-  return first(sorted_backups).get('Unique Identifier').lower()
+  backup_paths     = filter(os.path.isdir, path_items(backups_path))
+  manifests        = map(backup_manifest, backup_paths)
+  device_manifests = filter(lambda manifest: is_device(device, manifest), manifests)
+  useful_manifests = sorted(device_manifests, key=backup_date, reverse=True)
+  return first(useful_manifests)
+
+
+def backup_manifest(backup_path):
+  """Read backup manifest."""
+  return read_plist(os.path.join(backup_path, 'Manifest.plist'))
+
+
+def backup_date(manifest):
+  """Return backup creation date."""
+  return manifest.get('Date') # or datetime.datetime.min?
+
+
+def is_device(device, manifest):
+  """Check if device has device name, UDID, or serial number."""
+  if device == None:
+    return True
+  lockdown = manifest.get('Lockdown')
+  return device in [lockdown.get('DeviceName'),
+                    lockdown.get('UniqueDeviceID'),
+                    lockdown.get('SerialNumber')]
+
+
+def installed(metadata, installed_apps):
+  """Predicate if app is installed."""
+  return metadata.get('app_name') in installed_apps
 
 
 def first(list):
@@ -121,30 +192,15 @@ def first(list):
     return None
 
 
-def is_device(device, info):
-  """Check if device has device/display name, GUID, IMEI or serial number."""
-  if device == None:
-    return True
-  return device in [info.get('Device Name'),
-                    info.get('Display Name'),
-                    info.get('GUID'),
-                    info.get('ICCID'),
-                    info.get('IMEI'),
-                    info.get('Serial Number')]
-
-
-def installed(metadata, installed_apps):
-  """Predicate if app is installed."""
-  return metadata.get('app_name') in installed_apps
-
-
 def usage():
   """Shows usage/help screen."""
   return '''Usage: %s [options...] <file>
+Shows oldest purchased iOS app by release date.
 Options:
  -a, --apps-path=<path>     Non-default path to downloaded apps by iTunes
  -b, --backups-path=<path>  Non-default path to device backups
- -d, --device-id=<device>   Device id (name, GUID, ICCID, IMEI, serial number)
+ -d, --device-id=<device>   Device id (device name, UDID, or serial number)
+ -p, --purchased            By purchase instead of release date (incl. updates)
  -v, --version              Show version info
  -h, --help                 Show usage screen''' % os.path.basename(sys.argv[0])
 
@@ -157,45 +213,6 @@ def exit(code, str):
     print str
   return code
 
-
-def main(argv=None):
-  if not argv: argv = sys.argv[1:]
-  try:
-    long_opts = ['help', 'version', 'apps-path=', 'backups-path=', 'device-id=']
-    opts, args = getopt.getopt(argv, 'hva:b:d:', long_opts)
-  except getopt.GetoptError as err:
-    return exit(1, str(err) + '\n' + usage())
-  
-  apps_path    = DEFAULT_APPS_PATH
-  backups_path = DEFAULT_BACKUPS_PATH
-  device_id    = DEFAULT_DEVICE_ID
-  
-  for o, a in opts:
-    if (o in ['-h', '--help']):
-      return exit(0, usage())
-    elif (o in ['-v', '--version']):
-      return exit(0, VERSION)
-    elif (o in ['-a', '--apps-path']):
-      apps_path = a
-    elif (o in ['-b', '--backups-path']):
-      backups_path = a
-    elif (o in ['-d', '--device-id']):
-      device_id = a
-    else:
-      return exit(1, 'invalid argument: "%s".' % a)
-  
-  try:
-    ipa_path  = os.path.expanduser(apps_path)
-    ipa_files = filter(is_ipa, path_items(ipa_path))
-    down_apps = map(aggregate, ipa_files)
-    inst_apps = installed_apps(os.path.expanduser(backups_path), device_id)
-    purc_apps = filter(lambda app: installed(app, inst_apps), down_apps)
-    rel_mvps  = sorted(purc_apps, key=lambda app: app.get('release_date'))
-    pur_mvps  = sorted(purc_apps, key=lambda app: app.get('purchase_date'))
-    print 'MVP (by release date) : ', first(rel_mvps).get('app_name')
-    print 'MVP (by purchase date): ', first(pur_mvps).get('app_name')
-  except Exception as e:
-    return exit(1, str(e))
 
 if __name__ == '__main__':
   sys.exit(main())
