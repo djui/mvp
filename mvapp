@@ -145,9 +145,7 @@ def bundle_id(metadata):
 
 def installed_apps(backups_path, device):
   """Return a list of installed apps on a given device."""
-  latest = latest_backup(backups_path, device)
-  if not latest: raise AssertionException('No backup found')
-  return latest.get('Applications')
+  return latest_backup(backups_path, device).get('Applications')
 
 
 def latest_backup(backups_path, device):
@@ -156,6 +154,7 @@ def latest_backup(backups_path, device):
   manifests        = map(backup_manifest, backup_paths)
   device_manifests = filter(lambda manifest: is_device(device, manifest), manifests)
   useful_manifests = sorted(device_manifests, key=backup_date, reverse=True)
+  if not useful_manifests: raise AssertionException('No backup found')
   return first(useful_manifests)
 
 
