@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import datetime
+from functools import partial
 import getopt
 import os
 import plistlib
@@ -10,29 +11,25 @@ import sys
 import zipfile
 
 
-DEFAULT_APPS_PATH    = '~/Music/iTunes/iTunes Media/Mobile Applications'
-DEFAULT_BACKUPS_PATH = '~/Library/Application Support/MobileSync/Backup'
-DEFAULT_DEVICE_ID    = None
-VERSION              = '1.0'
+VERSION = '1.0'
 
 
 def main(argv=None):
   if not argv: argv = sys.argv[1:]
   try:
-    long_opts = ['help',
-                 'version',
-                 'apps-path=',
-                 'backups-path=',
-                 'device-id='
-                 'purchased',
-                 'list-all']
-    opts, args = getopt.getopt(argv, 'hva:b:d:pl', long_opts)
+    opts, args = getopt.getopt(argv, 'hva:b:d:pl', ['help',
+                                                    'version',
+                                                    'apps-path=',
+                                                    'backups-path=',
+                                                    'device-id='
+                                                    'purchased',
+                                                    'list-all'])
   except getopt.GetoptError as err:
     return exit(1, str(err) + '\n' + usage())
   
-  apps_path    = DEFAULT_APPS_PATH
-  backups_path = DEFAULT_BACKUPS_PATH
-  device_id    = DEFAULT_DEVICE_ID
+  apps_path    = '~/Music/iTunes/iTunes Media/Mobile Applications'
+  backups_path = '~/Library/Application Support/MobileSync/Backup'
+  device_id    = None
   sort_crit    = 'release_date'
   oldest       = True
   
@@ -59,7 +56,7 @@ def main(argv=None):
     ipa_files = filter(is_ipa, path_items(ipa_path))
     down_apps = map(aggregate, ipa_files)
     inst_apps = installed_apps(os.path.expanduser(backups_path), device_id)
-    purc_apps = filter(lambda app: installed(app, inst_apps), down_apps)
+    purc_apps = filter(partial(installed, inst_apps), down_apps)
     mvps      = sorted(purc_apps, key=lambda app: app.get(sort_crit))
     for mvp in mvps:
       print mvp.get('app_name'), mvp.get(sort_crit)
@@ -80,20 +77,20 @@ def is_ipa(filename):
 
 def aggregate(zipfilename):
   """Aggregate the release and purchase date for an ipa file."""
-  metadata = read_plist(extract_plist(zipfilename))
+  metadata = read_plist(zip_extract(zipfilename, 'iTunesMetadata.plist'))
   return {
-      'filename': zipfilename,
-      'app_name': bundle_id(metadata),
-      'release_date': release_date(metadata),
-      'purchase_date': purchase_date(metadata)
+    'filename'     : zipfilename,
+    'app_name'     : bundle_id(metadata),
+    'release_date' : release_date(metadata),
+    'purchase_date': purchase_date(metadata)
   }
 
 
-def extract_plist(zipfilename):
-  """Extract iTunesMetadata.plist file from ipa zip file."""
+def zip_extract(zipfilename, filename):
+  """Extract file from zip archive."""
   try:
     zfile = zipfile.ZipFile(zipfilename)
-    data  = zfile.read('iTunesMetadata.plist')
+    data  = zfile.read(filename)
   finally:
     zfile.close()
   return data
@@ -102,25 +99,37 @@ def extract_plist(zipfilename):
 def read_plist(plist):
   """Read binary/xml plist data/file."""
   if plist.find('\x00') < 0 and os.path.isfile(plist):
-    try:
-      file = open(plist)
-      data = read_plist_string(file.read())
-    finally:
-      file.close()
-    return data
-  else:
-    return read_plist_string(plist)
+    return read_plist_string(read_file(plist))
+  return read_plist_string(plist)
 
 
 def read_plist_string(plist):
   """Read binary/xml plist data."""
   if plist.startswith('bplist'):
-    proc = subprocess.Popen(['plutil', '-convert', 'xml1', '-o', '-', '-'], \
-                            stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    proc.stdin.write(plist)
-    return plistlib.readPlistFromString(proc.communicate()[0])
-  else:
-    return plistlib.readPlistFromString(plist)
+    return plistlib.readPlistFromString(convert_plist(plist))
+  return plistlib.readPlistFromString(plist)
+
+
+def convert_plist(plist):
+  """Convert binary plist data to xml plist data."""
+  return pipe(plist, ['plutil', '-convert', 'xml1', '-o', '-', '-'])
+
+
+def pipe(input, args):
+  """Pipe input into program."""
+  proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+  proc.stdin.write(input)
+  return proc.communicate()[0]
+
+
+def read_file(filename):
+  """Read content of file."""
+  try:
+    file = open(filename)
+    data = file.read()
+  finally:
+    file.close()
+  return data
 
 
 def release_date(metadata):
@@ -132,10 +141,9 @@ def purchase_date(metadata):
   """Query for purchase date."""
   if 'purchaseDate' in metadata:
     return metadata.get('purchaseDate')
-  else:
-    download_info = metadata.get('com.apple.iTunesStore.downloadInfo')
-    purchase_date = download_info.get('purchaseDate')
-    return datetime.datetime.strptime(purchase_date, '%Y-%m-%dT%H:%M:%SZ')
+  download_info = metadata.get('com.apple.iTunesStore.downloadInfo')
+  purchase_date = download_info.get('purchaseDate')
+  return datetime.datetime.strptime(purchase_date, '%Y-%m-%dT%H:%M:%SZ')
 
 
 def bundle_id(metadata):
@@ -149,13 +157,13 @@ def installed_apps(backups_path, device):
 
 
 def latest_backup(backups_path, device):
-  """Return path to latest backup"""
+  """Return path to latest backup."""
   backup_paths     = filter(os.path.isdir, path_items(backups_path))
   manifests        = map(backup_manifest, backup_paths)
-  device_manifests = filter(lambda manifest: is_device(device, manifest), manifests)
+  device_manifests = filter(partial(is_device, device), manifests)
   useful_manifests = sorted(device_manifests, key=backup_date, reverse=True)
   if not useful_manifests: raise AssertionException('No backup found')
-  return first(useful_manifests)
+  return useful_manifests[0]
 
 
 def backup_manifest(backup_path):
@@ -165,30 +173,24 @@ def backup_manifest(backup_path):
 
 def backup_date(manifest):
   """Return backup creation date."""
-  return manifest.get('Date') # or datetime.datetime.min?
+  return manifest.get('Date')
 
 
-def is_device(device, manifest):
+def is_device(device_id, manifest):
   """Check if device has device name, UDID, or serial number."""
-  if device == None:
+  if not device_id:
     return True
   lockdown = manifest.get('Lockdown')
-  return device in [lockdown.get('DeviceName'),
-                    lockdown.get('UniqueDeviceID'),
-                    lockdown.get('SerialNumber')]
+  return device_id in [
+    lockdown.get('DeviceName'),
+    lockdown.get('UniqueDeviceID'),
+    lockdown.get('SerialNumber')
+  ]
 
 
-def installed(metadata, installed_apps):
+def installed(installed_apps, metadata):
   """Predicate if app is installed."""
   return metadata.get('app_name') in installed_apps
-
-
-def first(list):
-  """Return first item in list or None."""
-  if list:
-    return list[0]
-  else:
-    return None
 
 
 def usage():
