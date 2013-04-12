@@ -77,6 +77,7 @@ def bundle_id(metadata):
   """Query for software version bundle id."""
   return metadata.get('softwareVersionBundleId')
 
+
 def aggregate(zipfilename):
   """Aggregate the release and purchase date for an ipa file."""
   metadata = read_plist(extract_plist(zipfilename))
@@ -90,13 +91,10 @@ def aggregate(zipfilename):
 
 def installed_apps(backups_path, device):
   """Return a list of installed apps on a given device."""
-  # return {{LATEST_BACKUP}}/HASH(Library/SpringBoard/IconState.plist) > ...
-  # return {{LATEST_BACKUP}}/Info.plist > iTunes Settings/Library Applications/*
-  # return {{LATEST_BACKUP}}/Manifest.plist > Applications/*
   latest = latest_backup(backups_path, device)
-  latest_path = os.path.join(backups_path, latest, 'Manifest.plist')
-  apps = read_plist(latest_path).get('Applications')
-  return apps.keys()
+  latest_path = os.path.join(backups_path, latest, 'Info.plist')
+  apps = read_plist(latest_path).get('Installed Applications')
+  return apps
 
 
 def backup_info(backup_path):
