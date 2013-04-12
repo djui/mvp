@@ -194,7 +194,7 @@ def first(list):
 def usage():
   """Shows usage/help screen."""
   return '''Usage: %s [options...] <file>
-Shows oldest purchased iOS app by release date.
+Shows oldest installed iOS app by release/purchase date.
 Options:
  -a, --apps-path=<path>     Non-default path to downloaded apps by iTunes
  -b, --backups-path=<path>  Non-default path to device backups
