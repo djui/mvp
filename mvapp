@@ -126,11 +126,12 @@ def is_device(device, info):
   """Check if device has device/display name, GUID, IMEI or serial number."""
   if device == None:
     return True
-  return device_name in [info.get('Device Name'),
-                         info.get('Display Name'),
-                         info.get('GUID Name'),
-                         info.get('IMEI Name'),
-                         info.get('Serial Number')]
+  return device in [info.get('Device Name'),
+                    info.get('Display Name'),
+                    info.get('GUID'),
+                    info.get('ICCID'),
+                    info.get('IMEI'),
+                    info.get('Serial Number')]
 
 
 def installed(metadata, installed_apps):
