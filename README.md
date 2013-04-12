@@ -1,6 +1,6 @@
 # MVP
 
-MVP (Most valuable application), generates a ranked list of currently installed
+MVP (Most Valuable apP), generates a ranked list of currently installed
 iOS app on your devices based on their release or purchase date. The idea is
 that the older an app is and still installed on your device, the higher its
 value for you as it's assumed you still use it (built-in apps from Apple are
