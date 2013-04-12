@@ -69,9 +69,9 @@ def purchase_date(metadata):
   if 'purchaseDate' in metadata:
     return metadata.get('purchaseDate')
   else:
-    info = metadata.get('com.apple.iTunesStore.downloadInfo')
-    return info.get('purchaseDate')
-
+    download_info = metadata.get('com.apple.iTunesStore.downloadInfo')
+    purchase_date = download_info.get('purchaseDate')
+    return datetime.datetime.strptime(purchase_date, '%Y-%m-%dT%H:%M:%SZ')
 
 def bundle_id(metadata):
   """Query for software version bundle id."""
