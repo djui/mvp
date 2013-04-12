@@ -111,6 +111,7 @@ def latest_backup(backups_path, device):
   device_backups = filter(lambda backup: is_device(device, backup), backups)
   sorter         = lambda backup: backup.get('Last Backup Date', datetime.datetime.min)
   sorted_backups = sorted(device_backups, key=sorter, reverse=True)
+  if not sorted_backups: raise AssertionError('No backup found')
   return first(sorted_backups).get('Unique Identifier').lower()
 
 
