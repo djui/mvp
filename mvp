@@ -52,10 +52,8 @@ def main(argv=None):
       return exit(1, 'invalid argument: "%s".' % a)
   
   try:
-    ipa_path  = os.path.expanduser(apps_path)
-    ipa_files = filter(is_ipa, path_items(ipa_path))
-    down_apps = map(aggregate, ipa_files)
-    inst_apps = installed_apps(os.path.expanduser(backups_path), device_id)
+    inst_apps = installed_apps(backups_path, device_id)
+    down_apps = map(aggregate, filter(is_ipa, path_items(apps_path)))
     purc_apps = filter(partial(installed, inst_apps), down_apps)
     mvps      = sorted(purc_apps, key=lambda app: app.get(sort_crit))
     for mvp in mvps:
@@ -67,7 +65,8 @@ def main(argv=None):
 
 def path_items(path):
   """Return items (directories, files, ...) in path."""
-  return [os.path.join(path, f) for f in os.listdir(path)]
+  expanded_path = os.path.expanduser(path)
+  return [os.path.join(expanded_path, f) for f in os.listdir(expanded_path)]
 
 
 def is_ipa(filename):
@@ -79,7 +78,6 @@ def aggregate(zipfilename):
   """Aggregate the release and purchase date for an ipa file."""
   metadata = read_plist(zip_extract(zipfilename, 'iTunesMetadata.plist'))
   return {
-    'filename'     : zipfilename,
     'app_name'     : bundle_id(metadata),
     'release_date' : release_date(metadata),
     'purchase_date': purchase_date(metadata)
